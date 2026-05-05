@@ -30,7 +30,7 @@ if not st.session_state.autenticado:
 # APP
 # =========================
 st.set_page_config(layout="wide")
-st.title("Radar Edge - Pressão na Mínima (Ranking de Probabilidade)")
+st.title("Radar Edge - Pressão em Suporte + Ranking de Probabilidade")
 
 ativos = [
 "RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
@@ -73,61 +73,72 @@ ativos = [
 ]
 
 # =========================
-# EDGE SCORING
+# FUNÇÃO EDGE RADAR
 # =========================
 def backtest(ticker):
 
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
 
-        if df.empty or len(df) < 50:
+        if df.empty or len(df) < 60:
             return None
 
+        # =========================
+        # INDICADORES BASE
+        # =========================
         df["EMA69"] = df["Close"].ewm(span=69).mean()
-        df["Min20"] = df["Low"].rolling(20).min()
+        df["SUP8"] = df["Low"].rolling(8).min()
 
         sinais = 0
         score_total = 0
 
-        for i in range(20, len(df)):
+        for i in range(8, len(df)):
 
             c = df.iloc[i]
 
             # =========================
-            # 1. TESTE DA MÍNIMA
+            # 1. TESTE DE SUPORTE
             # =========================
-            teste = c["Low"] <= c["Min20"] * 1.003
+            teste_suporte = c["Low"] <= c["SUP8"] * 1.01
 
             # =========================
-            # 2. PRESSÃO
+            # 2. PRESSÃO REAL (REJEIÇÃO)
             # =========================
-            pressao = (c["Close"] <= c["Open"])
+            range_candle = c["High"] - c["Low"]
+
+            if range_candle == 0:
+                continue
+
+            rejeicao_baixa = (c["Close"] - c["Low"]) / range_candle
+
+            pressao = rejeicao_baixa < 0.4  # fechou fraco / perto da mínima
 
             # =========================
-            # 3. TENDÊNCIA (FATOR CHAVE)
+            # 3. TENDÊNCIA (SEU PADRÃO INSTITUCIONAL)
             # =========================
             tendencia = c["Close"] > c["EMA69"]
 
             # =========================
-            # 4. PROFUNDIDADE DO TESTE
+            # 4. SCORE
             # =========================
-            profundidade = (c["Min20"] - c["Low"]) / c["Min20"] if c["Min20"] > 0 else 0
-
-            if teste and pressao:
+            if teste_suporte:
 
                 sinais += 1
 
-                # =========================
-                # SCORE
-                # =========================
                 score = 0
 
+                # tendência pesa forte
                 if tendencia:
-                    score += 3  # tendência é o maior peso
+                    score += 3
+                else:
+                    score -= 1
 
-                score += profundidade * 10  # quanto mais “raspa”, melhor
+                # pressão de venda
+                score += (1 - rejeicao_baixa) * 4
 
-                score += 1  # base do setup
+                # proximidade do suporte
+                dist = (c["Close"] - c["SUP8"]) / c["SUP8"]
+                score += max(0, (0.01 - dist) * 50)
 
                 score_total += score
 
@@ -162,10 +173,10 @@ if st.button("Rodar Radar"):
 
         df = pd.DataFrame(resultados)
 
-        st.subheader("📊 Ranking de Edge (Melhor Probabilidade → Pior)")
+        st.subheader("📊 Ranking de Edge (Melhor → Pior)")
         st.dataframe(df.sort_values("Edge Score", ascending=False))
 
-        st.subheader("📈 Ranking por Frequência de Sinais")
+        st.subheader("📈 Ranking de Frequência de Setup")
         st.dataframe(df.sort_values("Sinais", ascending=False))
 
     else:
