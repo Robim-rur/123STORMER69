@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import ta
 import numpy as np
 
 # =========================
@@ -34,7 +33,7 @@ if not st.session_state.autenticado:
 # APP PRINCIPAL
 # =========================
 st.set_page_config(layout="wide")
-st.title("Backtest - Rompimento de Fundo + EMA69")
+st.title("Backtest - Rompimento da Última Mínima + Padrão 1-2-3")
 
 ativos = [
 "RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
@@ -74,56 +73,64 @@ ativos = [
 "HGCR11","MCCI11","RECR11","VRTA11","BCFF11","HFOF11",
 "XPSF11","RBRP11","RBRF11","URIT11","RZTR11","RURA11",
 "VGIR11","CVBI11","UTLL11","GGRC11","HERT11","AUVP11","IEEX11"
-
 ]
 
-STOP = 0.95
-GAIN = 1.08
 
+# =========================
+# LÓGICA PURA: 1-2-3 + ROMPIMENTO
+# =========================
 def backtest(ticker):
 
     try:
         df = yf.download(ticker, period="3y", interval="1d", progress=False)
 
-        if df.empty or len(df) < 120:
+        if df.empty or len(df) < 50:
             return None
 
-        df["EMA69"] = ta.trend.ema_indicator(df["Close"], window=69)
-        df["Fundo"] = df["Low"].rolling(5).min().shift(1)
+        df["Min5"] = df["Low"].rolling(5).min().shift(1)
 
         trades = []
 
-        for i in range(70, len(df)-2):
+        for i in range(10, len(df)-2):
 
-            D = df.iloc[i]
-            D1 = df.iloc[i+1]
+            A = df.iloc[i-2]  # ponto 1
+            B = df.iloc[i-1]  # ponto 2
+            C = df.iloc[i]    # ponto 3
 
-            if D["Close"] <= D["EMA69"]:
+            # =========================
+            # PADRÃO 1-2-3 DE COMPRA
+            # =========================
+            cond_123 = (
+                B["Low"] < A["Low"] and
+                C["Low"] > B["Low"]
+            )
+
+            if not cond_123:
                 continue
 
-            if not (D["Low"] < D["Fundo"] and D["Close"] < D["Fundo"]):
+            # =========================
+            # ROMPIMENTO DA ÚLTIMA MÍNIMA
+            # =========================
+            if C["Low"] > C["Min5"]:
                 continue
 
-            entrada = D["High"]
-
-            if D1["High"] <= entrada:
-                continue
-
-            stop = entrada * STOP
-            gain = entrada * GAIN
+            entrada = C["High"]
 
             result = None
 
+            # simulação simples até o fim
             for j in range(i+1, len(df)):
 
-                c = df.iloc[j]
+                candle = df.iloc[j]
 
-                if c["Low"] <= stop:
-                    result = -1
+                # alvo simples: continuidade acima da entrada
+                if candle["Close"] > entrada:
+                    result = 1
                     break
 
-                if c["High"] >= gain:
-                    result = 1
+                # invalidação: perde mínima do setup
+                if candle["Close"] < C["Low"]:
+                    result = -1
                     break
 
             if result is not None:
@@ -145,6 +152,9 @@ def backtest(ticker):
         return None
 
 
+# =========================
+# EXECUÇÃO
+# =========================
 if st.button("Rodar Backtest"):
 
     resultados = []
