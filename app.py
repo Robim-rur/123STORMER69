@@ -30,7 +30,7 @@ if not st.session_state.autenticado:
 # APP
 # =========================
 st.set_page_config(layout="wide")
-st.title("Scanner - Rompimento do Topo do Repique (Candle 2)")
+st.title("Radar Edge - Pressão na Mínima (Ranking de Probabilidade)")
 
 ativos = [
 "RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
@@ -73,69 +73,73 @@ ativos = [
 ]
 
 # =========================
-# DETECÇÃO DE CANDLE 2 + ROMPIMENTO
+# EDGE SCORING
 # =========================
 def backtest(ticker):
 
     try:
-        df = yf.download(ticker, period="3y", interval="1d", progress=False)
+        df = yf.download(ticker, period="2y", interval="1d", progress=False)
 
         if df.empty or len(df) < 50:
             return None
 
-        trades = []
+        df["EMA69"] = df["Close"].ewm(span=69).mean()
+        df["Min20"] = df["Low"].rolling(20).min()
 
-        for i in range(2, len(df)-2):
+        sinais = 0
+        score_total = 0
 
-            # =========================
-            # IDENTIFICA CANDLE 2 (TOPO LOCAL)
-            # =========================
-            prev = df.iloc[i-1]
-            curr = df.iloc[i]
-            next_c = df.iloc[i+1]
+        for i in range(20, len(df)):
 
-            is_top = (
-                curr["High"] > prev["High"] and
-                curr["High"] > next_c["High"]
-            )
-
-            if not is_top:
-                continue
-
-            pivot_top = curr["High"]
+            c = df.iloc[i]
 
             # =========================
-            # AGUARDA ROMPIMENTO
+            # 1. TESTE DA MÍNIMA
             # =========================
-            result = None
+            teste = c["Low"] <= c["Min20"] * 1.003
 
-            for j in range(i+1, len(df)):
+            # =========================
+            # 2. PRESSÃO
+            # =========================
+            pressao = (c["Close"] <= c["Open"])
 
-                candle = df.iloc[j]
+            # =========================
+            # 3. TENDÊNCIA (FATOR CHAVE)
+            # =========================
+            tendencia = c["Close"] > c["EMA69"]
 
-                # rompimento do candle 2
-                if candle["Close"] > pivot_top:
-                    result = 1
-                    break
+            # =========================
+            # 4. PROFUNDIDADE DO TESTE
+            # =========================
+            profundidade = (c["Min20"] - c["Low"]) / c["Min20"] if c["Min20"] > 0 else 0
 
-                # invalidação simples (opcional)
-                if candle["Close"] < curr["Low"]:
-                    result = -1
-                    break
+            if teste and pressao:
 
-            if result is not None:
-                trades.append(result)
+                sinais += 1
 
-        if len(trades) == 0:
+                # =========================
+                # SCORE
+                # =========================
+                score = 0
+
+                if tendencia:
+                    score += 3  # tendência é o maior peso
+
+                score += profundidade * 10  # quanto mais “raspa”, melhor
+
+                score += 1  # base do setup
+
+                score_total += score
+
+        if sinais == 0:
             return None
 
-        trades = np.array(trades)
+        edge = score_total / sinais
 
         return {
             "Ativo": ticker.replace(".SA",""),
-            "Trades": len(trades),
-            "WinRate %": round((trades == 1).mean()*100,2),
-            "Expectativa": round(trades.mean(),3)
+            "Sinais": sinais,
+            "Edge Score": round(edge, 3)
         }
 
     except:
@@ -145,7 +149,7 @@ def backtest(ticker):
 # =========================
 # EXECUÇÃO
 # =========================
-if st.button("Rodar Scanner"):
+if st.button("Rodar Radar"):
 
     resultados = []
 
@@ -158,11 +162,11 @@ if st.button("Rodar Scanner"):
 
         df = pd.DataFrame(resultados)
 
-        st.subheader("📊 Ranking por WinRate")
-        st.dataframe(df.sort_values("WinRate %", ascending=False))
+        st.subheader("📊 Ranking de Edge (Melhor Probabilidade → Pior)")
+        st.dataframe(df.sort_values("Edge Score", ascending=False))
 
-        st.subheader("📈 Ranking por Expectativa")
-        st.dataframe(df.sort_values("Expectativa", ascending=False))
+        st.subheader("📈 Ranking por Frequência de Sinais")
+        st.dataframe(df.sort_values("Sinais", ascending=False))
 
     else:
-        st.warning("Nenhum rompimento encontrado")
+        st.warning("Nenhum ativo em condição de pressão")
