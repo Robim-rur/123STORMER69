@@ -4,7 +4,7 @@ import yfinance as yf
 import numpy as np
 
 # =========================
-# 🔐 SENHA
+# 🔐 LOGIN
 # =========================
 PASSWORD = "LUCRO6"
 
@@ -30,7 +30,7 @@ if not st.session_state.autenticado:
 # APP
 # =========================
 st.set_page_config(layout="wide")
-st.title("Radar Edge - Pressão em Suporte + Ranking de Probabilidade")
+st.title("Radar - Ataque ao Último Fundo (Swing Livre)")
 
 ativos = [
 "RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
@@ -73,72 +73,65 @@ ativos = [
 ]
 
 # =========================
-# FUNÇÃO EDGE RADAR
+# DETECÇÃO DE SWING LOW + ATAQUE
 # =========================
 def backtest(ticker):
 
     try:
         df = yf.download(ticker, period="2y", interval="1d", progress=False)
 
-        if df.empty or len(df) < 60:
+        if df.empty or len(df) < 50:
             return None
-
-        # =========================
-        # INDICADORES BASE
-        # =========================
-        df["EMA69"] = df["Close"].ewm(span=69).mean()
-        df["SUP8"] = df["Low"].rolling(8).min()
 
         sinais = 0
         score_total = 0
 
-        for i in range(8, len(df)):
-
-            c = df.iloc[i]
+        for i in range(5, len(df)-5):
 
             # =========================
-            # 1. TESTE DE SUPORTE
+            # PIVÔ DE FUNDO (SWING LOW)
             # =========================
-            teste_suporte = c["Low"] <= c["SUP8"] * 1.01
+            window = df.iloc[i-5:i+6]
+
+            curr = df.iloc[i]
+
+            is_swing_low = curr["Low"] == window["Low"].min()
+
+            if not is_swing_low:
+                continue
+
+            ultimo_fundo = curr["Low"]
 
             # =========================
-            # 2. PRESSÃO REAL (REJEIÇÃO)
+            # ATAQUE AO FUNDO (ROMPIMENTO OU TESTE)
             # =========================
-            range_candle = c["High"] - c["Low"]
+            proximidade = (curr["Close"] - ultimo_fundo) / ultimo_fundo
+
+            ataque = curr["Low"] <= ultimo_fundo * 1.005
+
+            # =========================
+            # PRESSÃO (FORÇA VENDEDORA)
+            # =========================
+            range_candle = curr["High"] - curr["Low"]
 
             if range_candle == 0:
                 continue
 
-            rejeicao_baixa = (c["Close"] - c["Low"]) / range_candle
+            fechamento_fraco = (curr["Close"] - curr["Low"]) / range_candle
 
-            pressao = rejeicao_baixa < 0.4  # fechou fraco / perto da mínima
+            pressao = fechamento_fraco < 0.35
 
-            # =========================
-            # 3. TENDÊNCIA (SEU PADRÃO INSTITUCIONAL)
-            # =========================
-            tendencia = c["Close"] > c["EMA69"]
-
-            # =========================
-            # 4. SCORE
-            # =========================
-            if teste_suporte:
+            if ataque and pressao:
 
                 sinais += 1
 
                 score = 0
 
-                # tendência pesa forte
-                if tendencia:
-                    score += 3
-                else:
-                    score -= 1
+                # quanto mais fundo “atacado”, maior o score
+                score += (1 - max(0, proximidade)) * 5
 
                 # pressão de venda
-                score += (1 - rejeicao_baixa) * 4
-
-                # proximidade do suporte
-                dist = (c["Close"] - c["SUP8"]) / c["SUP8"]
-                score += max(0, (0.01 - dist) * 50)
+                score += (1 - fechamento_fraco) * 4
 
                 score_total += score
 
@@ -173,11 +166,11 @@ if st.button("Rodar Radar"):
 
         df = pd.DataFrame(resultados)
 
-        st.subheader("📊 Ranking de Edge (Melhor → Pior)")
+        st.subheader("📊 Ranking de Edge (Ataque ao Último Fundo)")
         st.dataframe(df.sort_values("Edge Score", ascending=False))
 
-        st.subheader("📈 Ranking de Frequência de Setup")
+        st.subheader("📈 Frequência de Ataques")
         st.dataframe(df.sort_values("Sinais", ascending=False))
 
     else:
-        st.warning("Nenhum ativo em condição de pressão")
+        st.warning("Nenhum ativo atacando fundo no momento")
