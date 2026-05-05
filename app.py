@@ -4,13 +4,10 @@ import yfinance as yf
 import numpy as np
 
 # =========================
-# 🔐 SENHA (ALTERE AQUI)
+# 🔐 SENHA
 # =========================
 PASSWORD = "LUCRO6"
 
-# =========================
-# LOGIN
-# =========================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
@@ -30,10 +27,10 @@ if not st.session_state.autenticado:
     st.stop()
 
 # =========================
-# APP PRINCIPAL
+# APP
 # =========================
 st.set_page_config(layout="wide")
-st.title("Backtest - Rompimento da Última Mínima + Padrão 1-2-3")
+st.title("Scanner - Rompimento do Topo do Repique (Candle 2)")
 
 ativos = [
 "RRRP3","ALOS3","ALPA4","ABEV3","ARZZ3","ASAI3","AZUL4",
@@ -75,9 +72,8 @@ ativos = [
 "VGIR11","CVBI11","UTLL11","GGRC11","HERT11","AUVP11","IEEX11"
 ]
 
-
 # =========================
-# LÓGICA PURA: 1-2-3 + ROMPIMENTO
+# DETECÇÃO DE CANDLE 2 + ROMPIMENTO
 # =========================
 def backtest(ticker):
 
@@ -87,49 +83,43 @@ def backtest(ticker):
         if df.empty or len(df) < 50:
             return None
 
-        df["Min5"] = df["Low"].rolling(5).min().shift(1)
-
         trades = []
 
-        for i in range(10, len(df)-2):
-
-            A = df.iloc[i-2]  # ponto 1
-            B = df.iloc[i-1]  # ponto 2
-            C = df.iloc[i]    # ponto 3
+        for i in range(2, len(df)-2):
 
             # =========================
-            # PADRÃO 1-2-3 DE COMPRA
+            # IDENTIFICA CANDLE 2 (TOPO LOCAL)
             # =========================
-            cond_123 = (
-                B["Low"] < A["Low"] and
-                C["Low"] > B["Low"]
+            prev = df.iloc[i-1]
+            curr = df.iloc[i]
+            next_c = df.iloc[i+1]
+
+            is_top = (
+                curr["High"] > prev["High"] and
+                curr["High"] > next_c["High"]
             )
 
-            if not cond_123:
+            if not is_top:
                 continue
 
-            # =========================
-            # ROMPIMENTO DA ÚLTIMA MÍNIMA
-            # =========================
-            if C["Low"] > C["Min5"]:
-                continue
+            pivot_top = curr["High"]
 
-            entrada = C["High"]
-
+            # =========================
+            # AGUARDA ROMPIMENTO
+            # =========================
             result = None
 
-            # simulação simples até o fim
             for j in range(i+1, len(df)):
 
                 candle = df.iloc[j]
 
-                # alvo simples: continuidade acima da entrada
-                if candle["Close"] > entrada:
+                # rompimento do candle 2
+                if candle["Close"] > pivot_top:
                     result = 1
                     break
 
-                # invalidação: perde mínima do setup
-                if candle["Close"] < C["Low"]:
+                # invalidação simples (opcional)
+                if candle["Close"] < curr["Low"]:
                     result = -1
                     break
 
@@ -155,7 +145,7 @@ def backtest(ticker):
 # =========================
 # EXECUÇÃO
 # =========================
-if st.button("Rodar Backtest"):
+if st.button("Rodar Scanner"):
 
     resultados = []
 
@@ -168,11 +158,11 @@ if st.button("Rodar Backtest"):
 
         df = pd.DataFrame(resultados)
 
-        st.subheader("📊 Ranking por Probabilidade")
+        st.subheader("📊 Ranking por WinRate")
         st.dataframe(df.sort_values("WinRate %", ascending=False))
 
         st.subheader("📈 Ranking por Expectativa")
         st.dataframe(df.sort_values("Expectativa", ascending=False))
 
     else:
-        st.warning("Sem resultados")
+        st.warning("Nenhum rompimento encontrado")
